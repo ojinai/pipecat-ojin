@@ -1,0 +1,57 @@
+[project]
+name = "pipecat-ojin"
+version = "0.1.0"
+description = "Ojin avatar (Speech-To-Video) and TTS services for Pipecat"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Journee" }]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "pipecat-ai>=1.3.0",
+    "ojin-client[stv]>=0.6.7",
+    "pydantic>=2,<3",
+]
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.urls]
+Homepage = "https://ojin.ai"
+Repository = "https://github.com/ojinai/pipecat-ojin"
+Documentation = "https://docs.ojin.ai"
+Issues = "https://github.com/ojinai/pipecat-ojin/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "ruff>=0.11.4",
+    "build>=0.10.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["pipecat_ojin"]
+
+[tool.ruff]
+target-version = "py310"
+lint.select = ["E", "F", "I", "B", "SIM", "RUF"]
+lint.ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pipecat_ojin"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
