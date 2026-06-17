@@ -162,11 +162,12 @@ class OjinTTSService(TTSService):
         except asyncio.CancelledError:
             pass
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str | None = None) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio for the given text.
 
         Args:
             text: The text to synthesize.
+            context_id: Optional context ID threaded through TTS frames (pipecat 1.4 contract).
 
         Yields:
             TTSAudioRawFrame frames containing the synthesized audio.
@@ -203,7 +204,7 @@ class OjinTTSService(TTSService):
             return
 
         # Yield TTSStartedFrame
-        yield TTSStartedFrame()
+        yield TTSStartedFrame(context_id=context_id)
 
         # Track if we completed normally
         completed_normally = False
@@ -224,6 +225,7 @@ class OjinTTSService(TTSService):
                             audio=response.audio_frame_bytes,
                             sample_rate=self._settings.sample_rate,
                             num_channels=1,
+                            context_id=context_id,
                         )
 
                     if response.is_final_response:
@@ -241,7 +243,7 @@ class OjinTTSService(TTSService):
                 await self._cancel_and_clear_queue()
 
         # Yield TTSStoppedFrame
-        yield TTSStoppedFrame()
+        yield TTSStoppedFrame(context_id=context_id)
 
     async def _cancel_and_clear_queue(self) -> None:
         """Cancel the current interaction and clear any pending audio chunks."""

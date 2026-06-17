@@ -4,6 +4,7 @@ Exercises construction and the not-connected path without a real WebSocket by
 injecting a fake low-level client whose connect() always fails.
 """
 
+import inspect
 import unittest
 
 from pipecat.frames.frames import ErrorFrame
@@ -45,4 +46,13 @@ class TestOjinTTSService(unittest.IsolatedAsyncioTestCase):
     async def test_run_tts_yields_error_frame_when_not_connected(self) -> None:
         svc = _service()
         frames = [frame async for frame in svc.run_tts("hello")]
+        self.assertTrue(any(isinstance(f, ErrorFrame) for f in frames))
+
+    def test_run_tts_signature_matches_pipecat_base(self) -> None:
+        params = list(inspect.signature(OjinTTSService.run_tts).parameters)
+        self.assertEqual(params[:3], ["self", "text", "context_id"])
+
+    async def test_run_tts_accepts_positional_context_id(self) -> None:
+        svc = _service()
+        frames = [f async for f in svc.run_tts("hello", "ctx-1")]  # base calls it positionally
         self.assertTrue(any(isinstance(f, ErrorFrame) for f in frames))
