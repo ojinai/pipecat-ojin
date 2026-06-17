@@ -25,9 +25,9 @@ cp env.example .env                   # paste your keys into .env
 python bot.py                         # -> open http://localhost:7860/client
 ```
 
-> While `ojin-client` is not yet on PyPI, also run
-> `pip install -e "/home/ubuntu/python-sdk[stv]"` first so pip can resolve the
-> `pipecat-ojin` dependency.
+> While `ojin-client` and `pipecat-ojin` are not yet on PyPI, first install the
+> Ojin Python SDK from source so pip can resolve the dependency: clone
+> https://github.com/ojinai/python-sdk and run `pip install -e "/path/to/python-sdk[stv]"`.
 
 | Command | What it does |
 |---|---|
