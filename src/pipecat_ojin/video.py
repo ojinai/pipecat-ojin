@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     StartFrame,
     TTSAudioRawFrame,
+    InterruptionFrame,
     TTSStartedFrame,
     UserStartedSpeakingFrame,
 )
@@ -71,16 +72,11 @@ class OjinVideoSettings:
 
     api_key: str = ""
     config_id: str = ""
-    image_size: Tuple[int, int] = (512, 512)
     ws_url: str = "wss://models.ojin.ai/realtime"
-
-
-def _is_trailing_silence(pcm: bytes, sample_rate: int, num_channels: int) -> bool:
-    """True for the ~0.5 s all-zero sentinel the client discards in send_tts_audio."""
-    if not pcm:
-        return False
-    duration = len(pcm) / (sample_rate * num_channels * 2)
-    return abs(duration - 0.5) < 0.01 and pcm == b"\x00" * len(pcm)
+    # When True (default), TTS audio sent during the avatar's cold-start handshake
+    # is buffered and replayed once the session is ready, instead of dropped — so
+    # an opening line isn't lost. Set False to drop pre-init audio (old behavior).
+    buffer_preinit_tts_audio: bool = True
 
 
 class _PushFrameOutput:
@@ -140,9 +136,9 @@ class OjinVideoService(FrameProcessor):
             api_key=settings.api_key,
             config_id=settings.config_id,
             ws_url=settings.ws_url,
-            image_size=settings.image_size,
             output=self._output,
             tracer=session_trace,
+            buffer_preinit_tts_audio=settings.buffer_preinit_tts_audio,
         )
         self._wire_events()
 
@@ -196,13 +192,13 @@ class OjinVideoService(FrameProcessor):
             await self._stv.start_turn()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
-            if _is_trailing_silence(frame.audio, frame.sample_rate, frame.num_channels):
-                return
             if self._waiting_for_first_tts:
                 self._waiting_for_first_tts = False
                 await self.start_ttfb_metrics()
-            await self._stv.send_tts_audio(frame.audio, frame.sample_rate, frame.num_channels)
-        elif isinstance(frame, UserStartedSpeakingFrame):
+            await self._stv.send_tts_audio(
+                frame.audio, frame.sample_rate, frame.num_channels
+            )
+        elif isinstance(frame, InterruptionFrame):
             await self._stv.interrupt()
             await self.push_frame(frame, direction)
         elif isinstance(frame, (EndFrame, CancelFrame)):
