@@ -1,0 +1,108 @@
+name: Release
+
+# Publish pipecat-ojin to PyPI when the version in pyproject.toml is bumped on main.
+#
+# Trigger: a push to `main` that touches pyproject.toml. The `check` job then confirms
+# the version actually changed (vs the previous commit) before anything is built or
+# published — so an ordinary feature merge that doesn't bump the version is a no-op.
+#
+# Auth: PyPI Trusted Publishing (OIDC). No API tokens are stored anywhere; the
+# `publish` job mints a short-lived token that PyPI trusts. This requires a one-time
+# setup on PyPI (a trusted publisher for this repo + workflow) and a GitHub
+# Environment named `pypi` — see the PR description / repo README.
+
+on:
+  push:
+    branches: [main]
+    paths: ["pyproject.toml"]
+  # Manual re-publish of the version currently on main — e.g. after fixing a
+  # failed verify, when the auto-trigger won't re-fire because the version is
+  # unchanged. Forces build+publish of whatever version main is at.
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # 1) Did the version actually change? Everything downstream hangs off this.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.v.outputs.SHOULD_BUILD }}
+      version: ${{ steps.v.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # need HEAD~1 to diff the version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: v
+        env:
+          # Manual (workflow_dispatch) runs force a publish of the current main
+          # version; pushes only publish when the version actually changed.
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+        run: |
+          python .ci/release_check.py extract_current_version
+          python .ci/release_check.py check_build $FORCE
+
+  # 2) Run the same checks reviewers run; never publish a red main.
+  #    Skipped (and so is everything after it) when the version didn't change.
+  #    Uses the shared ci-verify composite action so this gate and the PR check
+  #    (pr-check.yml) run identical checks and can never drift — a green PR guarantees
+  #    a green release verify. The build step lives in the `build` job below.
+  #    See .github/actions/ci-verify.
+  verify:
+    needs: check
+    if: needs.check.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-verify
+
+  # 3) Build sdist + wheel with uv, hand them to the publish job as an artifact.
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # 4) Publish to PyPI via OIDC trusted publishing — no secrets.
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # mint the OIDC token PyPI trusts
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # 5) Tag the release commit (replaces the manual `git tag vX.Y.Z`).
+  tag:
+    needs: [check, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tag
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag the release commit
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists on origin; skipping."
+          else
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+          fi

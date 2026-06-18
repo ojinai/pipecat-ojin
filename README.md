@@ -1,12 +1,11 @@
 # pipecat-ojin
 
 Ojin's [Pipecat](https://github.com/pipecat-ai/pipecat) integration: drop a
-**lip-synced talking-avatar face** (`OjinVideoService`) and Ojin's
-**text-to-speech** (`OjinTTSService`) into any Pipecat pipeline.
+**lip-synced talking-avatar face** (`OjinVideoService`) into your existing pipeline in minutes.
 
 `OjinVideoService` is the one stage that turns a voice agent into a video-call
 avatar — it lip-syncs to whatever your TTS produces and streams the avatar video
-back. It sits in the same slot as Pipecat's Simli / Tavus / HeyGen avatars:
+back. It sits in the same slot as other video services in pipecat:
 
 ```
 transport.input() -> STT -> LLM -> TTS -> [OjinVideoService] -> transport.output()
@@ -15,7 +14,7 @@ transport.input() -> STT -> LLM -> TTS -> [OjinVideoService] -> transport.output
 This package is a thin adapter over the framework-agnostic
 [`ojin-client`](https://github.com/ojinai/python-sdk) SDK — all avatar behaviour
 (A/V sync, audio-as-clock playback, barge-in re-sync) lives in the SDK. It is
-**not** a fork of Pipecat.
+**not** a fork of Pipecat — it depends on `pipecat-ai` as a library.
 
 ## Install
 
@@ -24,7 +23,7 @@ pip install pipecat-ojin
 ```
 
 This pulls in `pipecat-ai` and `ojin-client[stv]`. You provide the STT / LLM /
-TTS services for your pipeline (e.g. `pip install "pipecat-ai[deepgram,openai,cartesia]"`).
+TTS services for your pipeline (e.g. `pip install "pipecat-ai[deepgram,groq,elevenlabs]"`).
 
 ## Quickstart — the avatar face
 
@@ -36,7 +35,6 @@ avatar = OjinVideoService(
     OjinVideoSettings(
         api_key="OJIN_API_KEY",
         config_id="OJIN_CONFIG_ID",   # the Face model to drive
-        image_size=(512, 512),         # must match the transport's video_out size
     )
 )
 
@@ -44,6 +42,10 @@ pipeline = Pipeline(
     [transport.input(), stt, llm, tts, avatar, transport.output()]
 )
 ```
+
+The avatar's frame size comes from your Face model (`config_id`) — set your
+transport's `video_out_width` / `video_out_height` to match it (the example uses
+512×512).
 
 Get your `OJIN_API_KEY` and a Face model `OJIN_CONFIG_ID` from
 [ojin.ai](https://ojin.ai) (docs: [docs.ojin.ai](https://docs.ojin.ai)).
@@ -60,16 +62,6 @@ trace = OjinSessionTrace(session_id="my-call", config_id="OJIN_CONFIG_ID")
 avatar = OjinVideoService(OjinVideoSettings(...), session_trace=trace)
 ```
 
-## Ojin text-to-speech
-
-```python
-from pipecat_ojin import OjinTTSService, OjinTTSServiceSettings
-
-tts = OjinTTSService(
-    OjinTTSServiceSettings(api_key="OJIN_API_KEY", config_id="OJIN_CONFIG_ID")
-)
-```
-
 ## Example
 
 A complete, runnable voice + avatar agent (browser WebRTC or Daily) lives in
@@ -79,9 +71,9 @@ A complete, runnable voice + avatar agent (browser WebRTC or Daily) lives in
 
 | Requirement | Version |
 |---|---|
-| Python | ≥ 3.10 |
+| Python | ≥ 3.11 |
 | `pipecat-ai` | ≥ 1.3.0 |
-| `ojin-client[stv]` | ≥ 0.6.7 |
+| `ojin-client[stv]` | ≥ 0.7.1 |
 
 ## License
 

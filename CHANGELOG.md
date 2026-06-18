@@ -11,5 +11,4 @@ Initial release. Standalone Pipecat integration for Ojin, built on upstream
 - `OjinVideoService` — lip-synced talking-avatar face (`FrameProcessor` over
   `ojin.stv.OjinSTVClient`), with an optional playback-start gate and per-session
   Perfetto tracing.
-- `OjinTTSService` — Ojin text-to-speech (`TTSService`).
 - `examples/ojin-bot/` — a runnable browser/Daily voice + avatar agent.
