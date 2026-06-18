@@ -18,7 +18,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Optional
 
 from ojin.stv import (
     OjinSessionTrace,
@@ -31,11 +31,11 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
     TTSAudioRawFrame,
-    InterruptionFrame,
     TTSStartedFrame,
     UserStartedSpeakingFrame,
 )
@@ -45,6 +45,12 @@ logger = logging.getLogger(__name__)
 
 # Per-session Perfetto trace output dir (same layout as the python-sdk example).
 _TRACE_ROOT = os.getenv("OJIN_STV_TRACE_DIR", "/root/debug/sessions/stv-pipecat-ojin")
+
+# The ~0.5 s all-zero trailing-silence sentinel some TTS engines emit. These mirror
+# OjinSTVClient.send_tts_audio's own discard rule (ojin.stv) so the adapter can drop
+# it *before* arming TTFB — TTFB must time the first real audio, not the silence.
+_HALF_SECOND = 0.5
+_HALF_SECOND_TOL = 0.01
 
 
 @dataclass
@@ -192,13 +198,21 @@ class OjinVideoService(FrameProcessor):
             await self._stv.start_turn()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
+            if self._is_trailing_silence(frame):
+                # Drop the trailing-silence sentinel here, before arming TTFB: TTFB
+                # must time the first *real* audio. It never reaches the client (which
+                # would discard it too) and leaves TTFB un-armed for the next frame.
+                return
             if self._waiting_for_first_tts:
                 self._waiting_for_first_tts = False
                 await self.start_ttfb_metrics()
             await self._stv.send_tts_audio(
                 frame.audio, frame.sample_rate, frame.num_channels
             )
-        elif isinstance(frame, InterruptionFrame):
+        elif isinstance(frame, (InterruptionFrame, UserStartedSpeakingFrame)):
+            # Barge-in: an explicit interruption — or the user starting to speak —
+            # cuts the avatar's current turn. Forward the frame so the rest of the
+            # pipeline still sees it.
             await self._stv.interrupt()
             await self.push_frame(frame, direction)
         elif isinstance(frame, (EndFrame, CancelFrame)):
@@ -207,6 +221,19 @@ class OjinVideoService(FrameProcessor):
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
+
+    @staticmethod
+    def _is_trailing_silence(frame: TTSAudioRawFrame) -> bool:
+        """Whether ``frame`` is the ~0.5 s all-zero trailing-silence sentinel.
+
+        Mirrors ``OjinSTVClient.send_tts_audio``'s discard rule so the adapter can
+        drop it before arming TTFB metrics (which must time the first real audio).
+        """
+        pcm = frame.audio
+        if not pcm or any(pcm):  # empty, or any non-zero byte -> real audio
+            return False
+        duration = len(pcm) / (frame.sample_rate * frame.num_channels * 2)
+        return abs(duration - _HALF_SECOND) < _HALF_SECOND_TOL
 
     def _write_trace(self) -> None:
         """Dump the session's Perfetto trace to disk on close (best-effort, once)."""

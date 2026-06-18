@@ -104,7 +104,12 @@ class TestPlaybackGate(unittest.IsolatedAsyncioTestCase):
         )
         await svc._output.write_video(
             STVVideoFrame(
-                rgb=b"rgbrgb", source_bytes=b"jpg", width=1, height=2, frame_type=1, pts=0
+                rgb=b"rgbrgb",
+                source_bytes=b"jpg",
+                width=1,
+                height=2,
+                frame_type=1,
+                pts=0,
             )
         )
         pushed = [c.args[0] for c in svc.push_frame.call_args_list]
@@ -127,7 +132,9 @@ class TestPlaybackGate(unittest.IsolatedAsyncioTestCase):
             STVAudioFrame(pcm=b"\x01\x00", sample_rate=24000, num_channels=1, pts=0)
         )
         await svc._output.write_video(
-            STVVideoFrame(rgb=b"rgb", source_bytes=b"jpg", width=4, height=4, frame_type=1, pts=0)
+            STVVideoFrame(
+                rgb=b"rgb", source_bytes=b"jpg", width=4, height=4, frame_type=1, pts=0
+            )
         )
         svc.push_frame.assert_not_called()
 
@@ -135,7 +142,9 @@ class TestPlaybackGate(unittest.IsolatedAsyncioTestCase):
         svc = _adapter(FakeSTVClient())
         svc.push_frame = AsyncMock()
         await svc._output.write_video(
-            STVVideoFrame(rgb=None, source_bytes=b"jpg", width=1, height=1, frame_type=0, pts=0)
+            STVVideoFrame(
+                rgb=None, source_bytes=b"jpg", width=1, height=1, frame_type=0, pts=0
+            )
         )
         svc.push_frame.assert_not_called()
 
@@ -156,7 +165,8 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         fake, svc = self._wired()
         await fake.emit(STVEvent.SESSION_READY, session_data={"foo": 1})
         init = [
-            c for c in svc.push_frame.call_args_list
+            c
+            for c in svc.push_frame.call_args_list
             if isinstance(c.args[0], OjinVideoInitializedFrame)
         ]
         self.assertEqual(len(init), 2)
@@ -213,10 +223,13 @@ class TestFrameRouting(unittest.IsolatedAsyncioTestCase):
         first = _audio()
         await svc.process_frame(first, FrameDirection.DOWNSTREAM)
         await svc.process_frame(_audio(), FrameDirection.DOWNSTREAM)
-        sends = [c for c in fake.calls if isinstance(c, tuple) and c[0] == "send_tts_audio"]
+        sends = [
+            c for c in fake.calls if isinstance(c, tuple) and c[0] == "send_tts_audio"
+        ]
         self.assertEqual(len(sends), 2)
         self.assertEqual(
-            sends[0], ("send_tts_audio", first.audio, first.sample_rate, first.num_channels)
+            sends[0],
+            ("send_tts_audio", first.audio, first.sample_rate, first.num_channels),
         )
         svc.start_ttfb_metrics.assert_awaited_once()
 
@@ -264,7 +277,9 @@ class TestTtfbAndSilence(unittest.IsolatedAsyncioTestCase):
         await svc.process_frame(TTSStartedFrame(), FrameDirection.DOWNSTREAM)
         await svc.process_frame(_silence(), FrameDirection.DOWNSTREAM)
         svc.start_ttfb_metrics.assert_not_awaited()
-        self.assertNotIn("send_tts_audio", [c[0] for c in fake.calls if isinstance(c, tuple)])
+        self.assertNotIn(
+            "send_tts_audio", [c[0] for c in fake.calls if isinstance(c, tuple)]
+        )
         # the real first frame that follows still arms TTFB once
         await svc.process_frame(_audio(), FrameDirection.DOWNSTREAM)
         svc.start_ttfb_metrics.assert_awaited_once()
