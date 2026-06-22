@@ -357,5 +357,29 @@ class TestLifecycleThroughPipeline(unittest.IsolatedAsyncioTestCase):
         self.assertIn("close", fake.calls)
 
 
+class TestStvConfigPassthrough(unittest.TestCase):
+    """OjinVideoSettings.stv_config reaches the real OjinSTVClient.
+
+    Construction is offline (no connect), so this exercises the production path
+    where no ``stv_client`` is injected — the route that enables the otherwise
+    off-by-default loop-stall diagnostics in deployment.
+    """
+
+    def test_config_forwarded_to_client(self) -> None:
+        from ojin.stv import STVConfig
+
+        cfg = STVConfig(stall_probe_ms=70.0, loop_stall_watchdog_ms=250.0)
+        svc = OjinVideoService(OjinVideoSettings(stv_config=cfg))
+        self.assertIs(svc._stv._config, cfg)
+        self.assertEqual(svc._stv._config.stall_probe_ms, 70.0)
+        self.assertEqual(svc._stv._config.loop_stall_watchdog_ms, 250.0)
+
+    def test_default_leaves_watchdog_disabled(self) -> None:
+        svc = OjinVideoService(OjinVideoSettings())
+        # No config passed -> client builds STVConfig() defaults: diagnostics off.
+        self.assertEqual(svc._stv._config.stall_probe_ms, 0.0)
+        self.assertEqual(svc._stv._config.loop_stall_watchdog_ms, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
