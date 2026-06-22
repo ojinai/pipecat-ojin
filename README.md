@@ -16,6 +16,12 @@ This package is a thin adapter over the framework-agnostic
 (A/V sync, audio-as-clock playback, barge-in re-sync) lives in the SDK. It is
 **not** a fork of Pipecat — it depends on `pipecat-ai` as a library.
 
+The SDK also **shapes the audio it forwards** to Ojin — priming a lead, then
+coalescing your TTS into large chunks — so the inference head never starves and
+lip-sync stays stable, whatever cadence your TTS produces. You don't manage
+input buffering, the playback clock, or frame-dropping; `OjinVideoService` just
+sits after your TTS and lip-syncs to it.
+
 ## Install
 
 ```bash
@@ -66,6 +72,26 @@ avatar = OjinVideoService(OjinVideoSettings(...), session_trace=trace)
 
 A complete, runnable voice + avatar agent (browser WebRTC or Daily) lives in
 [`examples/ojin-bot/`](examples/ojin-bot/).
+
+## Deployment
+
+`OjinVideoService` connects to Ojin over a WebSocket built for **server-to-server**
+use on a stable connection. Run your pipeline on a backend — ideally in **US East**,
+near Ojin's inference — for the lowest latency, and deliver the final media to your
+users over a realtime transport such as WebRTC or Daily.
+
+## Troubleshooting
+
+- **Avatar's mouth barely moves** — confirm TTS audio is actually flowing into
+  `OjinVideoService`. The SDK shapes the feed for you, so this usually means the
+  pipeline isn't producing audio rather than a chunking problem.
+- **Garbled or stretched video** — your transport's `video_out_width` /
+  `video_out_height` must match the Face model's frame size (`image_size`, e.g. `512×512`).
+- **Higher latency than expected** — run the pipeline server-side in US East over a
+  stable connection; don't run it on an end-user device.
+- **`No backend servers available`** — inference capacity is momentarily exhausted; retry shortly.
+
+Full guidance lives at **[docs.ojin.ai](https://docs.ojin.ai)** → Guides → Optimizing Performance / Troubleshooting.
 
 ## Compatibility
 
