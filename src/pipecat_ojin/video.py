@@ -24,6 +24,7 @@ from ojin.stv import (
     OjinSessionTrace,
     OjinSTVClient,
     STVAudioFrame,
+    STVConfig,
     STVEvent,
     STVVideoFrame,
 )
@@ -83,6 +84,11 @@ class OjinVideoSettings:
     # is buffered and replayed once the session is ready, instead of dropped — so
     # an opening line isn't lost. Set False to drop pre-init audio (old behavior).
     buffer_preinit_tts_audio: bool = True
+    # Behavioral knobs forwarded to the underlying OjinSTVClient (buffering, fps,
+    # barge-in, and the off-by-default loop-stall diagnostics). None -> the client
+    # builds its own STVConfig() defaults. Set a config to enable the stall
+    # watchdog / probe (loop_stall_watchdog_ms / stall_probe_ms) in production.
+    stv_config: Optional[STVConfig] = None
 
 
 class _PushFrameOutput:
@@ -144,6 +150,7 @@ class OjinVideoService(FrameProcessor):
             ws_url=settings.ws_url,
             output=self._output,
             tracer=session_trace,
+            config=settings.stv_config,
             buffer_preinit_tts_audio=settings.buffer_preinit_tts_audio,
         )
         self._wire_events()
