@@ -61,6 +61,16 @@ class OjinVideoInitializedFrame(Frame):
     session_data: Optional[dict] = None
 
 
+@dataclass
+class OjinFirstVideoFrame(Frame):
+    """First real rendered avatar frame has been pushed to the transport.
+
+    Emitted once, when the head's first non-empty frame is forwarded downstream
+    (idle or speech). Downstream consumers reveal the avatar; an upstream gate
+    starts accepting user audio.
+    """
+
+
 class OjinBotStartedSpeakingFrame(Frame):
     """Emitted when the avatar starts speaking (a buffer is promoted to current)."""
 
@@ -105,6 +115,14 @@ class _PushFrameOutput:
 
     async def write_video(self, frame: STVVideoFrame) -> None:
         if self._svc._can_start_playback and frame.rgb is not None:
+            if not self._svc._first_video_pushed:
+                self._svc._first_video_pushed = True
+                await self._svc.push_frame(
+                    OjinFirstVideoFrame(), FrameDirection.DOWNSTREAM
+                )
+                await self._svc.push_frame(
+                    OjinFirstVideoFrame(), FrameDirection.UPSTREAM
+                )
             await self._svc.push_frame(
                 OutputImageRawFrame(
                     image=frame.rgb,
@@ -141,6 +159,7 @@ class OjinVideoService(FrameProcessor):
         super().__init__(name="ojin-video")
         self._settings = settings
         self._can_start_playback = True  # gate open by default; close to defer A/V
+        self._first_video_pushed = False  # one-shot: first real frame forwarded
         self._waiting_for_first_tts = False
         self._trace = session_trace
         self._output = _PushFrameOutput(self)
