@@ -25,6 +25,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat_ojin.video import (
     OjinBotStartedSpeakingFrame,
     OjinBotStoppedSpeakingFrame,
+    OjinFirstVideoFrame,
     OjinVideoInitializedFrame,
     OjinVideoService,
     OjinVideoSettings,
@@ -379,6 +380,61 @@ class TestStvConfigPassthrough(unittest.TestCase):
         # No config passed -> client builds STVConfig() defaults: diagnostics off.
         self.assertEqual(svc._stv._config.stall_probe_ms, 0.0)
         self.assertEqual(svc._stv._config.loop_stall_watchdog_ms, 0.0)
+
+
+class TestFirstVideoFrameSignal(unittest.IsolatedAsyncioTestCase):
+    """The adapter emits OjinFirstVideoFrame once, on the first real pushed frame."""
+
+    async def test_first_real_frame_emits_once_both_directions(self) -> None:
+        svc = _adapter(FakeSTVClient())
+        svc.push_frame = AsyncMock()
+
+        # First real frame (rgb set) → one OjinFirstVideoFrame per direction.
+        await svc._output.write_video(
+            STVVideoFrame(
+                rgb=b"rgb", source_bytes=b"jpg", width=2, height=2, frame_type=0, pts=0
+            )
+        )
+        firsts = [
+            c
+            for c in svc.push_frame.call_args_list
+            if isinstance(c.args[0], OjinFirstVideoFrame)
+        ]
+        self.assertEqual(len(firsts), 2)
+        self.assertEqual(
+            {c.args[1] for c in firsts},
+            {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM},
+        )
+
+        # Subsequent frames must NOT emit another OjinFirstVideoFrame.
+        svc.push_frame.reset_mock()
+        await svc._output.write_video(
+            STVVideoFrame(
+                rgb=b"rgb2", source_bytes=b"jpg", width=2, height=2, frame_type=1, pts=1
+            )
+        )
+        again = [
+            c
+            for c in svc.push_frame.call_args_list
+            if isinstance(c.args[0], OjinFirstVideoFrame)
+        ]
+        self.assertEqual(len(again), 0)
+
+    async def test_no_signal_while_gate_closed(self) -> None:
+        svc = _adapter(FakeSTVClient())
+        svc.push_frame = AsyncMock()
+        svc.set_can_start_playback(False)
+        await svc._output.write_video(
+            STVVideoFrame(
+                rgb=b"rgb", source_bytes=b"jpg", width=2, height=2, frame_type=0, pts=0
+            )
+        )
+        firsts = [
+            c
+            for c in svc.push_frame.call_args_list
+            if isinstance(c.args[0], OjinFirstVideoFrame)
+        ]
+        self.assertEqual(len(firsts), 0)
 
 
 if __name__ == "__main__":
