@@ -123,13 +123,26 @@ class _PushFrameOutput:
                 await self._svc.push_frame(
                     OjinFirstVideoFrame(), FrameDirection.UPSTREAM
                 )
-            await self._svc.push_frame(
-                OutputImageRawFrame(
-                    image=frame.rgb,
-                    size=(frame.width, frame.height),
-                    format=frame.format,
-                )
+            out = OutputImageRawFrame(
+                image=frame.rgb,
+                size=(frame.width, frame.height),
+                format=frame.format,
             )
+            # Carry the client's per-frame monotonic presentation timestamp
+            # (STVVideoFrame.pts, nanoseconds; set in OjinSTVClient._emit_tick).
+            # Previously dropped here, which left the outgoing video timeline
+            # UNPINNED: with ``video_out_is_live=True`` the Daily output paces
+            # video off its own wall clock and stamps RTP at draw time, so any
+            # encoder/SFU re-time at a content boundary surfaces on the client
+            # as a multi-second media_time/RTP jump (the turn-boundary freeze;
+            # see notes/wiki/issues/30-06-2026/freeze_on_interruption).
+            # NOTE: honoring this pts for pacing additionally requires
+            # ``video_out_is_live=False`` AND rebasing this monotonic pts onto
+            # the pipeline clock's epoch (the two clocks share no origin) — a
+            # change that must be A/B-validated on a live Daily session before
+            # enabling. Carrying the value here is a safe, inert prerequisite.
+            out.pts = frame.pts
+            await self._svc.push_frame(out)
 
     def on_event(self, event: STVEvent, **kwargs: object) -> None:
         pass  # lifecycle events are wired via the client's emitter (see _wire_events)
@@ -235,12 +248,13 @@ class OjinVideoService(FrameProcessor):
             await self._stv.send_tts_audio(
                 frame.audio, frame.sample_rate, frame.num_channels
             )
-        elif isinstance(frame, (InterruptionFrame, UserStartedSpeakingFrame)):
-            # Barge-in: an explicit interruption — or the user starting to speak —
-            # cuts the avatar's current turn. Forward the frame so the rest of the
-            # pipeline still sees it.
+        elif isinstance(frame, InterruptionFrame):
+            # Barge-in on the pipeline's GATED interruption signal only. InterruptionFrame is
+            # broadcast solely when interruptions are actually allowed (e.g. DeepgramFlux
+            # ``should_interrupt`` / a UserTurnStartStrategy's ``enable_interruptions``), so
+            # honoring it here respects the configured interruption policy.
             await self._stv.interrupt()
-            await self.push_frame(frame, direction)
+            await self.push_frame(frame, direction)        
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stv.close()
             self._write_trace()

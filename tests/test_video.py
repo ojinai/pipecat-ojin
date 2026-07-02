@@ -125,6 +125,35 @@ class TestPlaybackGate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(image[0].size, (1, 2))
         self.assertEqual(image[0].format, "RGB")
 
+    async def test_video_frame_carries_client_pts(self) -> None:
+        """The outgoing OutputImageRawFrame must carry the client's monotonic pts.
+
+        Regression guard for the turn-boundary freeze: dropping the pts left the
+        Daily video timeline unpinned (RTP stamped off Daily's own wall clock),
+        so an encoder/SFU re-time surfaced as a multi-second media_time jump on
+        the client. See notes/wiki/issues/30-06-2026/freeze_on_interruption.
+        """
+        svc = _adapter(FakeSTVClient())
+        svc.push_frame = AsyncMock()
+        pts_ns = 1_234_567_890_123
+        await svc._output.write_video(
+            STVVideoFrame(
+                rgb=b"rgbrgb",
+                source_bytes=b"jpg",
+                width=1,
+                height=2,
+                frame_type=1,
+                pts=pts_ns,
+            )
+        )
+        image = [
+            c.args[0]
+            for c in svc.push_frame.call_args_list
+            if isinstance(c.args[0], OutputImageRawFrame)
+        ]
+        self.assertEqual(len(image), 1)
+        self.assertEqual(image[0].pts, pts_ns)
+
     async def test_closed_gate_drops_audio_and_video(self) -> None:
         svc = _adapter(FakeSTVClient())
         svc.push_frame = AsyncMock()
