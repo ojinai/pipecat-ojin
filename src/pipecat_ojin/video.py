@@ -29,6 +29,8 @@ from ojin.stv import (
     STVVideoFrame,
 )
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -212,14 +214,28 @@ class OjinVideoService(FrameProcessor):
             await self.push_frame(frame, FrameDirection.DOWNSTREAM)
             await self.push_frame(frame, FrameDirection.UPSTREAM)
 
+        # The avatar CONSUMES TTSAudioRawFrame and re-emits plain OutputAudioRawFrame,
+        # so BaseOutputTransport's own bot-speech detection never fires in an Ojin
+        # pipeline — this adapter must therefore emit the STOCK speaking-boundary
+        # frames itself, both directions, exactly as the transport would (they are
+        # SystemFrames, so they bypass paused process queues). Without the upstream
+        # BotStoppedSpeakingFrame, a TTS service with pause_frame_processing=True
+        # (e.g. ElevenLabs) pauses after its first utterance and waits forever for a
+        # resume that never comes: every later utterance is silently held (root cause
+        # of the silent certifier session, 2026-07-02). The custom Ojin* frames stay
+        # for downstream consumers (latency, lifecycle/nudge timing, observers).
         @self._stv.on(STVEvent.BOT_STARTED_SPEAKING)
         async def _on_started(**_):
             await self.push_frame(OjinBotStartedSpeakingFrame())
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
             await self.stop_ttfb_metrics()
 
         @self._stv.on(STVEvent.BOT_STOPPED_SPEAKING)
         async def _on_stopped(**_):
             await self.push_frame(OjinBotStoppedSpeakingFrame())
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         @self._stv.on(STVEvent.ERROR)
         async def _on_error(message="", fatal=False, **_):
