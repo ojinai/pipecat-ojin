@@ -7,11 +7,11 @@ metrics. All avatar behaviour lives in ojin.stv and is tested there.
 """
 
 import asyncio
+import contextlib
 import unittest
 from unittest.mock import AsyncMock
 
 import pytest
-
 from ojin.stv import STVAudioFrame, STVEvent, STVVideoFrame
 from ojin.stv.events import EventEmitter
 from pipecat.frames.frames import (
@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     TTSAudioRawFrame,
@@ -303,10 +304,20 @@ class TestFrameRouting(unittest.IsolatedAsyncioTestCase):
         pushed = [c.args[0] for c in svc.push_frame.call_args_list]
         self.assertNotIn(frame, pushed)
 
-    async def test_user_started_speaking_interrupts(self) -> None:
+    async def test_interruption_frame_interrupts(self) -> None:
+        # Barge-in fires on the pipeline's GATED InterruptionFrame — broadcast
+        # only when interruptions are actually allowed — not on raw VAD.
+        fake, svc = self._svc()
+        await svc.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        self.assertIn("interrupt", fake.calls)
+
+    async def test_user_started_speaking_does_not_interrupt(self) -> None:
+        # Regression guard: the adapter must NOT barge in on the unconditional
+        # UserStartedSpeakingFrame (that ignored the interruption policy and cut
+        # the avatar off mid-utterance). Only InterruptionFrame may interrupt.
         fake, svc = self._svc()
         await svc.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-        self.assertIn("interrupt", fake.calls)
+        self.assertNotIn("interrupt", fake.calls)
 
     async def test_end_frame_closes_client(self) -> None:
         fake, svc = self._svc()
@@ -571,10 +582,8 @@ class TestPausedTTSResume(unittest.IsolatedAsyncioTestCase):
             # can wedge even during teardown (observed live 2026-07-02). Cancel the
             # runner future best-effort and fail loudly instead of hanging CI.
             run.cancel()
-            try:
+            with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
                 await asyncio.wait_for(run, timeout=5)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                pass
             self.fail(
                 "pipeline deadlocked: the TTS paused after utterance 1 and never "
                 "resumed — the avatar must emit the stock BotStoppedSpeakingFrame "
