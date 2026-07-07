@@ -6,14 +6,20 @@ the playback-start gate, and (c) maps client events to Pipecat frames + TTFB
 metrics. All avatar behaviour lives in ojin.stv and is tested there.
 """
 
+import asyncio
+import contextlib
 import unittest
 from unittest.mock import AsyncMock
 
+import pytest
 from ojin.stv import STVAudioFrame, STVEvent, STVVideoFrame
 from ojin.stv.events import EventEmitter
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     TTSAudioRawFrame,
@@ -125,6 +131,35 @@ class TestPlaybackGate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(image[0].size, (1, 2))
         self.assertEqual(image[0].format, "RGB")
 
+    async def test_video_frame_carries_client_pts(self) -> None:
+        """The outgoing OutputImageRawFrame must carry the client's monotonic pts.
+
+        Regression guard for the turn-boundary freeze: dropping the pts left the
+        Daily video timeline unpinned (RTP stamped off Daily's own wall clock),
+        so an encoder/SFU re-time surfaced as a multi-second media_time jump on
+        the client. See notes/wiki/issues/30-06-2026/freeze_on_interruption.
+        """
+        svc = _adapter(FakeSTVClient())
+        svc.push_frame = AsyncMock()
+        pts_ns = 1_234_567_890_123
+        await svc._output.write_video(
+            STVVideoFrame(
+                rgb=b"rgbrgb",
+                source_bytes=b"jpg",
+                width=1,
+                height=2,
+                frame_type=1,
+                pts=pts_ns,
+            )
+        )
+        image = [
+            c.args[0]
+            for c in svc.push_frame.call_args_list
+            if isinstance(c.args[0], OutputImageRawFrame)
+        ]
+        self.assertEqual(len(image), 1)
+        self.assertEqual(image[0].pts, pts_ns)
+
     async def test_closed_gate_drops_audio_and_video(self) -> None:
         svc = _adapter(FakeSTVClient())
         svc.push_frame = AsyncMock()
@@ -175,18 +210,44 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         dirs = {c.args[1] for c in init}
         self.assertEqual(dirs, {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM})
 
-    async def test_started_speaking_emits_frame_and_stops_ttfb(self) -> None:
+    async def test_started_speaking_emits_custom_plus_stock_both_directions(
+        self,
+    ) -> None:
         fake, svc = self._wired()
         await fake.emit(STVEvent.BOT_STARTED_SPEAKING)
         pushed = [type(c.args[0]) for c in svc.push_frame.call_args_list]
         self.assertIn(OjinBotStartedSpeakingFrame, pushed)
+        # Stock boundary frames mirror BaseOutputTransport (which never fires in an
+        # Ojin pipeline because the avatar consumes TTSAudioRawFrame): one per direction.
+        stock = [
+            c
+            for c in svc.push_frame.call_args_list
+            if type(c.args[0]) is BotStartedSpeakingFrame
+        ]
+        self.assertEqual(len(stock), 2)
+        self.assertEqual(
+            {c.args[1] for c in stock},
+            {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM},
+        )
         svc.stop_ttfb_metrics.assert_awaited_once()
 
-    async def test_stopped_speaking_emits_frame(self) -> None:
+    async def test_stopped_speaking_emits_custom_plus_stock_both_directions(
+        self,
+    ) -> None:
         fake, svc = self._wired()
         await fake.emit(STVEvent.BOT_STOPPED_SPEAKING)
         pushed = [type(c.args[0]) for c in svc.push_frame.call_args_list]
         self.assertIn(OjinBotStoppedSpeakingFrame, pushed)
+        stock = [
+            c
+            for c in svc.push_frame.call_args_list
+            if type(c.args[0]) is BotStoppedSpeakingFrame
+        ]
+        self.assertEqual(len(stock), 2)
+        self.assertEqual(
+            {c.args[1] for c in stock},
+            {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM},
+        )
 
     async def test_error_event_pushes_error_with_message_and_fatal(self) -> None:
         fake, svc = self._wired()
@@ -243,10 +304,20 @@ class TestFrameRouting(unittest.IsolatedAsyncioTestCase):
         pushed = [c.args[0] for c in svc.push_frame.call_args_list]
         self.assertNotIn(frame, pushed)
 
-    async def test_user_started_speaking_interrupts(self) -> None:
+    async def test_interruption_frame_interrupts(self) -> None:
+        # Barge-in fires on the pipeline's GATED InterruptionFrame — broadcast
+        # only when interruptions are actually allowed — not on raw VAD.
+        fake, svc = self._svc()
+        await svc.process_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+        self.assertIn("interrupt", fake.calls)
+
+    async def test_user_started_speaking_does_not_interrupt(self) -> None:
+        # Regression guard: the adapter must NOT barge in on the unconditional
+        # UserStartedSpeakingFrame (that ignored the interruption policy and cut
+        # the avatar off mid-utterance). Only InterruptionFrame may interrupt.
         fake, svc = self._svc()
         await svc.process_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-        self.assertIn("interrupt", fake.calls)
+        self.assertNotIn("interrupt", fake.calls)
 
     async def test_end_frame_closes_client(self) -> None:
         fake, svc = self._svc()
@@ -435,6 +506,90 @@ class TestFirstVideoFrameSignal(unittest.IsolatedAsyncioTestCase):
             if isinstance(c.args[0], OjinFirstVideoFrame)
         ]
         self.assertEqual(len(firsts), 0)
+
+
+class _PlaybackSTVClient(FakeSTVClient):
+    """FakeSTVClient that simulates real playback: after receiving an utterance's
+    audio it fires BOT_STARTED_SPEAKING, then BOT_STOPPED_SPEAKING once "played" —
+    exactly the events the real client emits when its buffer promotes and drains."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._playback_tasks: list = []
+
+    async def send_tts_audio(self, pcm, sample_rate, num_channels) -> None:
+        await super().send_tts_audio(pcm, sample_rate, num_channels)
+        self._playback_tasks.append(asyncio.create_task(self._play()))
+
+    async def _play(self) -> None:
+        # Small delay so the TTS service's post-utterance pause engages BEFORE the
+        # playback-finished event arrives — the real ordering (playback lags synthesis).
+        await asyncio.sleep(0.1)
+        await self.emit(STVEvent.BOT_STARTED_SPEAKING)
+        await asyncio.sleep(0.05)
+        await self.emit(STVEvent.BOT_STOPPED_SPEAKING)
+
+
+@pytest.mark.timeout(30, method="thread")
+class TestPausedTTSResume(unittest.IsolatedAsyncioTestCase):
+    """DELIVERY-level regression test for the paused-TTS deadlock (2026-07-02).
+
+    TTS services with ``pause_frame_processing=True`` (e.g. ElevenLabs) pause their
+    own frame processing after every utterance and resume ONLY on the stock
+    ``BotStoppedSpeakingFrame`` — which stock pipelines get from the output
+    transport, but Ojin pipelines do not (the avatar consumes ``TTSAudioRawFrame``).
+    This test runs a REAL Pipeline (real TTSService pause semantics, real
+    OjinVideoService) and asserts the SECOND utterance is actually synthesized —
+    i.e. the frame is delivered, not merely created. Before the fix this test
+    deadlocks on the paused TTS (caught by the timeout).
+    """
+
+    async def test_second_utterance_synthesizes_after_avatar_playback(self) -> None:
+        from pipecat.frames.frames import TTSSpeakFrame
+        from pipecat.pipeline.pipeline import Pipeline
+        from pipecat.pipeline.runner import PipelineRunner
+        from pipecat.pipeline.task import PipelineParams, PipelineTask
+        from pipecat.services.tts_service import TTSService
+
+        class PausingTTS(TTSService):
+            """Minimal TTS with ElevenLabs-style pause-after-utterance semantics."""
+
+            def __init__(self) -> None:
+                super().__init__(pause_frame_processing=True, sample_rate=16000)
+                self.spoken: list[str] = []
+
+            async def run_tts(self, text: str, context_id: str):
+                self.spoken.append(text)
+                yield TTSAudioRawFrame(
+                    audio=b"\x01\x00" * 320, sample_rate=16000, num_channels=1
+                )
+
+        fake = _PlaybackSTVClient()
+        tts = PausingTTS()
+        svc = _adapter(fake)
+        pipeline = Pipeline([tts, svc])
+        task = PipelineTask(
+            pipeline, params=PipelineParams(audio_out_sample_rate=16000)
+        )
+        await task.queue_frames(
+            [TTSSpeakFrame("one"), TTSSpeakFrame("two"), EndFrame()]
+        )
+        runner = PipelineRunner(handle_sigint=False)
+        run = asyncio.get_running_loop().create_task(runner.run(task))
+        done, _ = await asyncio.wait({run}, timeout=10)
+        if not done:  # pragma: no cover - the regression itself
+            # Do NOT await task.cancel() here: with the resume missing, the pipeline
+            # can wedge even during teardown (observed live 2026-07-02). Cancel the
+            # runner future best-effort and fail loudly instead of hanging CI.
+            run.cancel()
+            with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(run, timeout=5)
+            self.fail(
+                "pipeline deadlocked: the TTS paused after utterance 1 and never "
+                "resumed — the avatar must emit the stock BotStoppedSpeakingFrame "
+                f"upstream at playback end (spoken so far: {tts.spoken})"
+            )
+        self.assertEqual(tts.spoken, ["one", "two"])
 
 
 if __name__ == "__main__":

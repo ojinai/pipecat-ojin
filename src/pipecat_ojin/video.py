@@ -29,6 +29,8 @@ from ojin.stv import (
     STVVideoFrame,
 )
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -38,7 +40,6 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -123,13 +124,26 @@ class _PushFrameOutput:
                 await self._svc.push_frame(
                     OjinFirstVideoFrame(), FrameDirection.UPSTREAM
                 )
-            await self._svc.push_frame(
-                OutputImageRawFrame(
-                    image=frame.rgb,
-                    size=(frame.width, frame.height),
-                    format=frame.format,
-                )
+            out = OutputImageRawFrame(
+                image=frame.rgb,
+                size=(frame.width, frame.height),
+                format=frame.format,
             )
+            # Carry the client's per-frame monotonic presentation timestamp
+            # (STVVideoFrame.pts, nanoseconds; set in OjinSTVClient._emit_tick).
+            # Previously dropped here, which left the outgoing video timeline
+            # UNPINNED: with ``video_out_is_live=True`` the Daily output paces
+            # video off its own wall clock and stamps RTP at draw time, so any
+            # encoder/SFU re-time at a content boundary surfaces on the client
+            # as a multi-second media_time/RTP jump (the turn-boundary freeze;
+            # see notes/wiki/issues/30-06-2026/freeze_on_interruption).
+            # NOTE: honoring this pts for pacing additionally requires
+            # ``video_out_is_live=False`` AND rebasing this monotonic pts onto
+            # the pipeline clock's epoch (the two clocks share no origin) — a
+            # change that must be A/B-validated on a live Daily session before
+            # enabling. Carrying the value here is a safe, inert prerequisite.
+            out.pts = frame.pts
+            await self._svc.push_frame(out)
 
     def on_event(self, event: STVEvent, **kwargs: object) -> None:
         pass  # lifecycle events are wired via the client's emitter (see _wire_events)
@@ -199,14 +213,28 @@ class OjinVideoService(FrameProcessor):
             await self.push_frame(frame, FrameDirection.DOWNSTREAM)
             await self.push_frame(frame, FrameDirection.UPSTREAM)
 
+        # The avatar CONSUMES TTSAudioRawFrame and re-emits plain OutputAudioRawFrame,
+        # so BaseOutputTransport's own bot-speech detection never fires in an Ojin
+        # pipeline — this adapter must therefore emit the STOCK speaking-boundary
+        # frames itself, both directions, exactly as the transport would (they are
+        # SystemFrames, so they bypass paused process queues). Without the upstream
+        # BotStoppedSpeakingFrame, a TTS service with pause_frame_processing=True
+        # (e.g. ElevenLabs) pauses after its first utterance and waits forever for a
+        # resume that never comes: every later utterance is silently held (root cause
+        # of the silent certifier session, 2026-07-02). The custom Ojin* frames stay
+        # for downstream consumers (latency, lifecycle/nudge timing, observers).
         @self._stv.on(STVEvent.BOT_STARTED_SPEAKING)
         async def _on_started(**_):
             await self.push_frame(OjinBotStartedSpeakingFrame())
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
             await self.stop_ttfb_metrics()
 
         @self._stv.on(STVEvent.BOT_STOPPED_SPEAKING)
         async def _on_stopped(**_):
             await self.push_frame(OjinBotStoppedSpeakingFrame())
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         @self._stv.on(STVEvent.ERROR)
         async def _on_error(message="", fatal=False, **_):
@@ -235,10 +263,11 @@ class OjinVideoService(FrameProcessor):
             await self._stv.send_tts_audio(
                 frame.audio, frame.sample_rate, frame.num_channels
             )
-        elif isinstance(frame, (InterruptionFrame, UserStartedSpeakingFrame)):
-            # Barge-in: an explicit interruption — or the user starting to speak —
-            # cuts the avatar's current turn. Forward the frame so the rest of the
-            # pipeline still sees it.
+        elif isinstance(frame, InterruptionFrame):
+            # Barge-in on the pipeline's GATED interruption signal only. InterruptionFrame is
+            # broadcast solely when interruptions are actually allowed (e.g. DeepgramFlux
+            # ``should_interrupt`` / a UserTurnStartStrategy's ``enable_interruptions``), so
+            # honoring it here respects the configured interruption policy.
             await self._stv.interrupt()
             await self.push_frame(frame, direction)
         elif isinstance(frame, (EndFrame, CancelFrame)):
