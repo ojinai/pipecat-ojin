@@ -166,7 +166,10 @@ class AvatarStatusObserver(BaseObserver):
             self._announced = True
             await self._rtvi.push_transport_message(
                 ServerMessage(
-                    data={"status": "ojin-video", "info": "Ojin video service connected."}
+                    data={
+                        "status": "ojin-video",
+                        "info": "Ojin video service connected.",
+                    }
                 )
             )
 
@@ -398,7 +401,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         logger.info("Client connected — connecting to Ojin video service…")
         await rtvi.push_transport_message(
             ServerMessage(
-                data={"status": "ojin-video", "info": "Connecting to Ojin video service…"}
+                data={
+                    "status": "ojin-video",
+                    "info": "Connecting to Ojin video service…",
+                }
             )
         )
         await worker.queue_frames([LLMRunFrame()])

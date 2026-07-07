@@ -270,7 +270,7 @@ class OjinVideoService(FrameProcessor):
             # ``should_interrupt`` / a UserTurnStartStrategy's ``enable_interruptions``), so
             # honoring it here respects the configured interruption policy.
             await self._stv.interrupt()
-            await self.push_frame(frame, direction)        
+            await self.push_frame(frame, direction)
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stv.close()
             self._write_trace()

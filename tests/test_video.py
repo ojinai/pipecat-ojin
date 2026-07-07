@@ -209,14 +209,20 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         dirs = {c.args[1] for c in init}
         self.assertEqual(dirs, {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM})
 
-    async def test_started_speaking_emits_custom_plus_stock_both_directions(self) -> None:
+    async def test_started_speaking_emits_custom_plus_stock_both_directions(
+        self,
+    ) -> None:
         fake, svc = self._wired()
         await fake.emit(STVEvent.BOT_STARTED_SPEAKING)
         pushed = [type(c.args[0]) for c in svc.push_frame.call_args_list]
         self.assertIn(OjinBotStartedSpeakingFrame, pushed)
         # Stock boundary frames mirror BaseOutputTransport (which never fires in an
         # Ojin pipeline because the avatar consumes TTSAudioRawFrame): one per direction.
-        stock = [c for c in svc.push_frame.call_args_list if type(c.args[0]) is BotStartedSpeakingFrame]
+        stock = [
+            c
+            for c in svc.push_frame.call_args_list
+            if type(c.args[0]) is BotStartedSpeakingFrame
+        ]
         self.assertEqual(len(stock), 2)
         self.assertEqual(
             {c.args[1] for c in stock},
@@ -224,12 +230,18 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         )
         svc.stop_ttfb_metrics.assert_awaited_once()
 
-    async def test_stopped_speaking_emits_custom_plus_stock_both_directions(self) -> None:
+    async def test_stopped_speaking_emits_custom_plus_stock_both_directions(
+        self,
+    ) -> None:
         fake, svc = self._wired()
         await fake.emit(STVEvent.BOT_STOPPED_SPEAKING)
         pushed = [type(c.args[0]) for c in svc.push_frame.call_args_list]
         self.assertIn(OjinBotStoppedSpeakingFrame, pushed)
-        stock = [c for c in svc.push_frame.call_args_list if type(c.args[0]) is BotStoppedSpeakingFrame]
+        stock = [
+            c
+            for c in svc.push_frame.call_args_list
+            if type(c.args[0]) is BotStoppedSpeakingFrame
+        ]
         self.assertEqual(len(stock), 2)
         self.assertEqual(
             {c.args[1] for c in stock},
