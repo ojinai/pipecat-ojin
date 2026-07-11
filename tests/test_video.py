@@ -56,6 +56,10 @@ class FakeSTVClient:
         self._events = EventEmitter()
         self.calls: list = []
         self.connect_return = True
+        self.audio_input_enabled = True
+
+    def is_audio_input_enabled(self) -> bool:
+        return self.audio_input_enabled
 
     def on(self, event):
         return self._events.on(event)
@@ -294,6 +298,22 @@ class TestFrameRouting(unittest.IsolatedAsyncioTestCase):
             ("send_tts_audio", first.audio, first.sample_rate, first.num_channels),
         )
         svc.start_ttfb_metrics.assert_awaited_once()
+
+    async def test_discarded_turn_drops_all_audio_and_skips_ttfb(self) -> None:
+        # A turn the client rejects (start_turn landed during an in-flight barge-in,
+        # so is_audio_input_enabled() is False) must not feed the avatar or arm TTFB,
+        # across every one of its audio frames — even if the interruption clears
+        # mid-turn (the flag stays False until the next accepted start_turn).
+        fake, svc = self._svc()
+        fake.audio_input_enabled = False
+        await svc.process_frame(TTSStartedFrame(), FrameDirection.DOWNSTREAM)
+        await svc.process_frame(_audio(), FrameDirection.DOWNSTREAM)
+        await svc.process_frame(_audio(), FrameDirection.DOWNSTREAM)
+        sends = [
+            c for c in fake.calls if isinstance(c, tuple) and c[0] == "send_tts_audio"
+        ]
+        self.assertEqual(sends, [])
+        svc.start_ttfb_metrics.assert_not_awaited()
 
     async def test_tts_audio_not_pushed_downstream(self) -> None:
         # The adapter never passes the TTS audio frame through; the client's
