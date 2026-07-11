@@ -248,14 +248,25 @@ class OjinVideoService(FrameProcessor):
             await self.push_frame(frame, direction)
             await self._stv.start()
         elif isinstance(frame, TTSStartedFrame):
-            self._waiting_for_first_tts = True
+            # start_turn decides whether this turn is accepted: a turn that opens
+            # while a barge-in is still settling is rejected wholesale by the client
+            # (the server discards its audio; see OjinSTVClient.is_audio_input_enabled).
+            # Only arm first-TTS bookkeeping when the turn's input will be processed.
             await self._stv.start_turn()
+            self._waiting_for_first_tts = self._stv.is_audio_input_enabled()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
             if self._is_trailing_silence(frame):
                 # Drop the trailing-silence sentinel here, before arming TTFB: TTFB
                 # must time the first *real* audio. It never reaches the client (which
                 # would discard it too) and leaves TTFB un-armed for the next frame.
+                return
+            if not self._stv.is_audio_input_enabled():
+                # This turn was rejected at start_turn (it opened during an ongoing
+                # interruption). Discard every one of its frames — don't feed the
+                # avatar, don't arm TTFB — so the client stays in sync with the
+                # server, which drops this audio too. Stays in effect for the whole
+                # turn, even if the interruption clears mid-turn.
                 return
             if self._waiting_for_first_tts:
                 self._waiting_for_first_tts = False
