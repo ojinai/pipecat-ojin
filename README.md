@@ -103,4 +103,4 @@ Full guidance lives at **[docs.ojin.ai](https://docs.ojin.ai)** → Guides → O
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+BSD-2-Clause. See [LICENSE](LICENSE).
