@@ -4,4 +4,4 @@
 def test_package_imports_with_version():
     import pipecat_ojin
 
-    assert pipecat_ojin.__version__ == "0.1.0"
+    assert pipecat_ojin.__version__ == "0.1.4"
