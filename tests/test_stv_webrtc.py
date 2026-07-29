@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 from ojin.stv import STVEvent, WebRTCSettings
 from ojin.stv.events import EventEmitter
-from ojin.stv.ojin_stv_webrtc_client import WEBRTC_JOIN_FAILED, WEBRTC_UNSUPPORTED
+from ojin.stv.ojin_stv_webrtc_client import WEBRTC_JOIN_FAILED
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -270,16 +270,14 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.args[0], "boom")
         self.assertTrue(call.kwargs.get("fatal"))
 
-    async def test_webrtc_unsupported_error_is_fatal(self) -> None:
+    async def test_relay_fallback_is_not_an_error(self) -> None:
+        """Protocol v2: sessionReady without a webrtc result = graceful relay
+        fallback. The client emits no ERROR (v1's fatal WEBRTC_UNSUPPORTED is
+        gone from the SDK), so the session proceeds normally."""
         fake, svc = self._wired()
-        await fake.emit(
-            STVEvent.ERROR,
-            message="Server did not advertise the webrtc capability",
-            code=WEBRTC_UNSUPPORTED,
-            fatal=True,
-        )
-        svc.push_error.assert_awaited_once()
-        self.assertTrue(svc.push_error.call_args.kwargs.get("fatal"))
+        await fake.emit(STVEvent.SESSION_READY, session_data={"p": 1})
+        await fake.emit(STVEvent.FIRST_FRAME, frame_type=0)
+        svc.push_error.assert_not_awaited()
 
     async def test_webrtc_join_failed_error_is_fatal(self) -> None:
         fake, svc = self._wired()
