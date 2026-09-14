@@ -453,6 +453,77 @@ class TestStvConfigPassthrough(unittest.TestCase):
         self.assertEqual(svc._stv._config.loop_stall_watchdog_ms, 0.0)
 
 
+class TestWebRTCPassthrough(unittest.IsolatedAsyncioTestCase):
+    """OjinVideoSettings.webrtc selects the SDK's direct-WebRTC path.
+
+    Construction is offline (no connect), so the settings-forwarding checks use the
+    real OjinSTVClient; event wiring uses the fake client.
+    """
+
+    @staticmethod
+    def _settings():
+        from ojin.stv import WebRTCSettings
+
+        return WebRTCSettings(
+            room_url="wss://example.livekit.cloud", token="secret", provider="livekit"
+        )
+
+    def test_webrtc_settings_forwarded_to_client(self) -> None:
+        webrtc = self._settings()
+        svc = OjinVideoService(OjinVideoSettings(webrtc=webrtc))
+        self.assertIsNotNone(svc._stv._webrtc)
+        self.assertIs(svc._stv._webrtc._webrtc_settings, webrtc)
+
+    def test_default_stays_on_websocket(self) -> None:
+        svc = OjinVideoService(OjinVideoSettings())
+        self.assertIsNone(svc._stv._webrtc)
+
+    async def test_first_frame_event_reveals_once_in_webrtc_mode(self) -> None:
+        fake = FakeSTVClient()
+        svc = _adapter(fake, webrtc=self._settings())
+        svc.push_frame = AsyncMock()
+        await fake.emit(STVEvent.FIRST_FRAME, frame_type=0)
+        await fake.emit(STVEvent.FIRST_FRAME, frame_type=1)
+        firsts = [
+            c
+            for c in svc.push_frame.call_args_list
+            if isinstance(c.args[0], OjinFirstVideoFrame)
+        ]
+        self.assertEqual(len(firsts), 2)
+        self.assertEqual(
+            {c.args[1] for c in firsts},
+            {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM},
+        )
+
+    async def test_first_frame_event_not_wired_in_websocket_mode(self) -> None:
+        # On the WebSocket path the reveal must stay behind the playback gate, so
+        # only a real pushed video frame (not the event) may emit it.
+        fake = FakeSTVClient()
+        svc = _adapter(fake)
+        svc.push_frame = AsyncMock()
+        await fake.emit(STVEvent.FIRST_FRAME, frame_type=0)
+        firsts = [
+            c
+            for c in svc.push_frame.call_args_list
+            if isinstance(c.args[0], OjinFirstVideoFrame)
+        ]
+        self.assertEqual(firsts, [])
+
+    async def test_webrtc_failure_is_a_fatal_pipeline_error(self) -> None:
+        fake = FakeSTVClient()
+        svc = _adapter(fake, webrtc=self._settings())
+        svc.push_frame = AsyncMock()
+        svc.push_error = AsyncMock()
+        await fake.emit(
+            STVEvent.ERROR,
+            message="webrtc negotiation failed (AUTH)",
+            code="WEBRTC_JOIN_FAILED",
+            fatal=True,
+        )
+        svc.push_error.assert_awaited_once()
+        self.assertTrue(svc.push_error.call_args.kwargs.get("fatal"))
+
+
 class TestFirstVideoFrameSignal(unittest.IsolatedAsyncioTestCase):
     """The adapter emits OjinFirstVideoFrame once, on the first real pushed frame."""
 

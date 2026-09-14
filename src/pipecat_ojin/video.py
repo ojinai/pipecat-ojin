@@ -10,6 +10,11 @@ All avatar behaviour (connect/retry, audio-as-clock playback, A/V sync, re-sync
 after barge-in, off-loop JPEG decode, session tracing) lives in
 ``ojin.stv.OjinSTVClient``; this class is only the mapping between Pipecat frames
 and the client's API. It needs ``ojin-client[stv]`` and ``pipecat-ai``.
+
+Set ``OjinVideoSettings.webrtc`` to use direct WebRTC instead: the inference
+server publishes the avatar straight into your Daily/LiveKit room, so this
+service pushes no audio/video frames downstream (disable the transport's audio
+and video out) while every lifecycle frame stays the same.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from ojin.stv import (
     STVConfig,
     STVEvent,
     STVVideoFrame,
+    WebRTCSettings,
 )
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -67,8 +73,9 @@ class OjinFirstVideoFrame(Frame):
     """First real rendered avatar frame has been pushed to the transport.
 
     Emitted once, when the head's first non-empty frame is forwarded downstream
-    (idle or speech). Downstream consumers reveal the avatar; an upstream gate
-    starts accepting user audio.
+    (idle or speech) — or, with direct WebRTC, when the avatar's first frame is
+    published into the room. Downstream consumers reveal the avatar; an upstream
+    gate starts accepting user audio.
     """
 
 
@@ -100,6 +107,11 @@ class OjinVideoSettings:
     # builds its own STVConfig() defaults. Set a config to enable the stall
     # watchdog / probe (loop_stall_watchdog_ms / stall_probe_ms) in production.
     stv_config: Optional[STVConfig] = None
+    # Direct WebRTC: when set, the inference server publishes the avatar straight
+    # into this Daily/LiveKit room instead of streaming frames back, so the service
+    # pushes no audio/video downstream. None -> the WebSocket path (frames pushed to
+    # transport.output()). A failed or unsupported WebRTC session is a fatal error.
+    webrtc: Optional[WebRTCSettings] = None
 
 
 class _PushFrameOutput:
@@ -116,14 +128,7 @@ class _PushFrameOutput:
 
     async def write_video(self, frame: STVVideoFrame) -> None:
         if self._svc._can_start_playback and frame.rgb is not None:
-            if not self._svc._first_video_pushed:
-                self._svc._first_video_pushed = True
-                await self._svc.push_frame(
-                    OjinFirstVideoFrame(), FrameDirection.DOWNSTREAM
-                )
-                await self._svc.push_frame(
-                    OjinFirstVideoFrame(), FrameDirection.UPSTREAM
-                )
+            await self._svc._push_first_video_frame_once()
             out = OutputImageRawFrame(
                 image=frame.rgb,
                 size=(frame.width, frame.height),
@@ -162,7 +167,9 @@ class OjinVideoService(FrameProcessor):
         """Build the adapter and wire the client's lifecycle events.
 
         Args:
-            settings: connection identity + avatar frame size.
+            settings: connection identity + avatar frame size. Set
+                ``settings.webrtc`` to publish the avatar straight into a
+                Daily/LiveKit room instead of pushing frames downstream.
             session_trace: an ``ojin.stv.OjinSessionTrace`` to record this call;
                 injected as the client's tracer and dumped to disk on close.
                 ``None`` -> the client uses a no-op tracer.
@@ -185,6 +192,7 @@ class OjinVideoService(FrameProcessor):
             tracer=session_trace,
             config=settings.stv_config,
             buffer_preinit_tts_audio=settings.buffer_preinit_tts_audio,
+            webrtc=settings.webrtc,
         )
         self._wire_events()
 
@@ -192,7 +200,8 @@ class OjinVideoService(FrameProcessor):
         """Open (``True``) or close (``False``) the playback gate.
 
         Defaults open. Close it before participant join to keep the connect->join
-        idle backlog out of the transport, then re-open at join.
+        idle backlog out of the transport, then re-open at join. With direct WebRTC
+        there is no local media to gate, so this has no effect.
         """
         self._can_start_playback = value
 
@@ -204,6 +213,14 @@ class OjinVideoService(FrameProcessor):
         """Connect the underlying client with retry; ``True`` on success."""
         return await self._stv.connect_with_retry()
 
+    async def _push_first_video_frame_once(self) -> None:
+        """Push ``OjinFirstVideoFrame`` both directions, at most once per session."""
+        if self._first_video_pushed:
+            return
+        self._first_video_pushed = True
+        await self.push_frame(OjinFirstVideoFrame(), FrameDirection.DOWNSTREAM)
+        await self.push_frame(OjinFirstVideoFrame(), FrameDirection.UPSTREAM)
+
     def _wire_events(self) -> None:
         """Map ``OjinSTVClient`` events onto Pipecat frames + TTFB metrics."""
 
@@ -212,6 +229,15 @@ class OjinVideoService(FrameProcessor):
             frame = OjinVideoInitializedFrame(session_data=session_data)
             await self.push_frame(frame, FrameDirection.DOWNSTREAM)
             await self.push_frame(frame, FrameDirection.UPSTREAM)
+
+        if self._settings.webrtc is not None:
+            # Direct WebRTC: the avatar's media goes to the room, so no frame ever
+            # reaches _PushFrameOutput. Reveal on the client's FIRST_FRAME instead.
+            # (Not wired on the WebSocket path, where the reveal must stay behind
+            # the playback gate in _PushFrameOutput.write_video.)
+            @self._stv.on(STVEvent.FIRST_FRAME)
+            async def _on_first_frame(**_):
+                await self._push_first_video_frame_once()
 
         # The avatar CONSUMES TTSAudioRawFrame and re-emits plain OutputAudioRawFrame,
         # so BaseOutputTransport's own bot-speech detection never fires in an Ojin

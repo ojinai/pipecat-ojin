@@ -68,6 +68,44 @@ trace = OjinSessionTrace(session_id="my-call", config_id="OJIN_CONFIG_ID")
 avatar = OjinVideoService(OjinVideoSettings(...), session_trace=trace)
 ```
 
+### Direct WebRTC (Daily / LiveKit)
+
+If your pipeline runs on a Daily or LiveKit transport, Ojin can publish the avatar
+**straight into the room** instead of streaming frames through your bot. Add
+`webrtc` to the settings — the rest of the pipeline is unchanged:
+
+```python
+from pipecat_ojin import OjinVideoService, OjinVideoSettings, WebRTCSettings
+
+avatar = OjinVideoService(
+    OjinVideoSettings(
+        api_key="OJIN_API_KEY",
+        config_id="OJIN_CONFIG_ID",
+        webrtc=WebRTCSettings(
+            provider="daily",          # or "livekit"
+            room_url=room_url,         # LiveKit: your wss:// server URL
+            token=avatar_token,        # the ojin-avatar participant's credential
+            audio_sample_rate=24000,   # your TTS output rate
+        ),
+    )
+)
+```
+
+- The inference server joins as the participant **`ojin-avatar`**. On LiveKit the
+  avatar's token must carry that identity and allow publishing; on Daily use a
+  meeting token for the room.
+- The service pushes **no audio/video frames** in this mode — set the transport's
+  `audio_out_enabled` / `video_out_enabled` to `False`. `OjinVideoInitializedFrame`,
+  `OjinFirstVideoFrame` and the speaking frames are emitted exactly as before.
+- Stop your bot from hearing the avatar: unsubscribe from the participant for which
+  `ojin.is_avatar_participant(participant)` (Daily) or
+  `ojin.is_avatar_identity(identity)` (LiveKit) is true.
+- There is no fallback: if the avatar can't join, the service pushes a fatal error
+  (`WEBRTC_JOIN_FAILED` / `WEBRTC_UNSUPPORTED`).
+
+`OjinSTVWebRTCService` (the earlier direct-WebRTC adapter) still works, but new
+code should use `OjinVideoService` with `webrtc=`.
+
 ## Example
 
 A complete, runnable voice + avatar agent (browser WebRTC or Daily) lives in
@@ -78,7 +116,9 @@ A complete, runnable voice + avatar agent (browser WebRTC or Daily) lives in
 `OjinVideoService` connects to Ojin over a WebSocket built for **server-to-server**
 use on a stable connection. Run your pipeline on a backend — ideally in **US East**,
 near Ojin's inference — for the lowest latency, and deliver the final media to your
-users over a realtime transport such as WebRTC or Daily.
+users over a realtime transport such as WebRTC or Daily. With direct WebRTC the
+avatar's media skips your backend entirely; only the lightweight control channel
+runs from your pipeline.
 
 ## Troubleshooting
 
@@ -99,7 +139,7 @@ Full guidance lives at **[docs.ojin.ai](https://docs.ojin.ai)** → Guides → O
 |---|---|
 | Python | ≥ 3.11 |
 | `pipecat-ai` | ≥ 1.3.0 |
-| `ojin-client[stv]` | ≥ 0.7.1 |
+| `ojin-client[stv]` | ≥ 0.11.0 |
 
 ## License
 
