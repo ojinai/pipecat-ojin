@@ -68,13 +68,14 @@ trace = OjinSessionTrace(session_id="my-call", config_id="OJIN_CONFIG_ID")
 avatar = OjinVideoService(OjinVideoSettings(...), session_trace=trace)
 ```
 
-### Direct WebRTC (Daily / LiveKit)
+### Direct WebRTC (LiveKit / Daily)
 
-If your pipeline runs on a Daily or LiveKit transport, Ojin can publish the avatar
+If your pipeline runs on a LiveKit or Daily transport, Ojin can publish the avatar
 **straight into the room** instead of streaming frames through your bot. Add
 `webrtc` to the settings — the rest of the pipeline is unchanged:
 
 ```python
+from ojin.stv import WebRTCProvider
 from pipecat_ojin import OjinVideoService, OjinVideoSettings, WebRTCSettings
 
 avatar = OjinVideoService(
@@ -82,14 +83,16 @@ avatar = OjinVideoService(
         api_key="OJIN_API_KEY",
         config_id="OJIN_CONFIG_ID",
         webrtc=WebRTCSettings(
-            provider="daily",          # or "livekit"
-            room_url=room_url,         # LiveKit: your wss:// server URL
-            token=avatar_token,        # the ojin-avatar participant's credential
-            audio_sample_rate=24000,   # your TTS output rate
+            provider=WebRTCProvider.LIVEKIT,  # Daily: WebRTCProvider.DAILY
+            room_url=room_url,                # your wss:// server URL (Daily: the room URL)
+            token=avatar_token,               # the ojin-avatar participant's credential
+            audio_sample_rate=24000,          # your TTS output rate
         ),
     )
 )
 ```
+
+`provider` also accepts the plain strings `"livekit"` and `"daily"`.
 
 - The inference server joins as the participant **`ojin-avatar`**. On LiveKit the
   avatar's token must carry that identity and allow publishing; on Daily use a
