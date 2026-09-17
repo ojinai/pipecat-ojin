@@ -11,9 +11,10 @@ All notable changes to `pipecat-ojin` are documented here. This project follows
   audio/video frames downstream (disable the transport's audio/video out). Every
   lifecycle frame is unchanged; `OjinFirstVideoFrame` is pushed from the client's
   `FIRST_FRAME` event in this mode. Leave `webrtc` unset for the WebSocket path.
-- A failed or unsupported WebRTC session is a fatal `push_error`
-  (`WEBRTC_JOIN_FAILED` / `WEBRTC_UNSUPPORTED`) — ojin-client 0.11 removed the
-  silent relay fallback.
+- A WebRTC session that cannot be opened (or that loses the room) is a fatal
+  `push_error` naming the cause — `WEBRTC_AUTH_FAILED`, `WEBRTC_NETWORK_FAILED`,
+  `WEBRTC_INVALID_SETTINGS`, `WEBRTC_JOIN_TIMEOUT`, `WEBRTC_ROOM_LOST` or
+  `WEBRTC_NOT_SUPPORTED` — ojin-client 0.11 removed the silent relay fallback.
 - `OjinSTVWebRTCService` is kept for existing callers; new code should use
   `OjinVideoService` with `webrtc=`.
 - Dependency floor raised: `ojin-client[stv]>=0.11.0`.

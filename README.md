@@ -100,8 +100,10 @@ avatar = OjinVideoService(
 - Stop your bot from hearing the avatar: unsubscribe from the participant for which
   `ojin.is_avatar_participant(participant)` (Daily) or
   `ojin.is_avatar_identity(identity)` (LiveKit) is true.
-- There is no fallback: if the avatar can't join, the service pushes a fatal error
-  (`WEBRTC_JOIN_FAILED` / `WEBRTC_UNSUPPORTED`).
+- There is no fallback: if the avatar can't join, or later drops out of the room, the
+  service pushes a fatal error naming the cause — `WEBRTC_AUTH_FAILED`,
+  `WEBRTC_NETWORK_FAILED`, `WEBRTC_INVALID_SETTINGS`, `WEBRTC_JOIN_TIMEOUT`,
+  `WEBRTC_ROOM_LOST` or `WEBRTC_NOT_SUPPORTED`.
 
 `OjinSTVWebRTCService` (the earlier direct-WebRTC adapter) still works, but new
 code should use `OjinVideoService` with `webrtc=`.

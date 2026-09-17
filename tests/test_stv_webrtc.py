@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 from ojin.stv import STVEvent, WebRTCSettings
 from ojin.stv.events import EventEmitter
-from ojin.stv.ojin_stv_webrtc_client import WEBRTC_JOIN_FAILED
+from ojin.stv.ojin_stv_webrtc_client import WEBRTC_JOIN_TIMEOUT
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -272,24 +272,24 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
 
     async def test_unsupported_server_error_is_fatal(self) -> None:
         """ojin-client 0.11: a server that can't publish into the room is a fatal
-        WEBRTC_UNSUPPORTED error (no silent relay fallback), surfaced as-is."""
+        WEBRTC_NOT_SUPPORTED error (no silent relay fallback), surfaced as-is."""
         fake, svc = self._wired()
         await fake.emit(STVEvent.SESSION_READY, session_data={"p": 1})
         await fake.emit(
             STVEvent.ERROR,
             message="The server does not support direct WebRTC for this session",
-            code="WEBRTC_UNSUPPORTED",
+            code="WEBRTC_NOT_SUPPORTED",
             fatal=True,
         )
         svc.push_error.assert_awaited_once()
         self.assertTrue(svc.push_error.call_args.kwargs.get("fatal"))
 
-    async def test_webrtc_join_failed_error_is_fatal(self) -> None:
+    async def test_webrtc_join_timeout_error_is_fatal(self) -> None:
         fake, svc = self._wired()
         await fake.emit(
             STVEvent.ERROR,
-            message="No terminal webrtcStatus within 10.0 s",
-            code=WEBRTC_JOIN_FAILED,
+            message="The session was not ready within 10.0 s",
+            code=WEBRTC_JOIN_TIMEOUT,
             fatal=True,
         )
         svc.push_error.assert_awaited_once()

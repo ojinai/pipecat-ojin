@@ -516,8 +516,8 @@ class TestWebRTCPassthrough(unittest.IsolatedAsyncioTestCase):
         svc.push_error = AsyncMock()
         await fake.emit(
             STVEvent.ERROR,
-            message="webrtc negotiation failed (AUTH)",
-            code="WEBRTC_JOIN_FAILED",
+            message="The room rejected the avatar's join (AUTH)",
+            code="WEBRTC_AUTH_FAILED",
             fatal=True,
         )
         svc.push_error.assert_awaited_once()
