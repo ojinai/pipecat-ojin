@@ -1,11 +1,16 @@
 """OjinSTVWebRTCService — a Pipecat adapter for direct-WebRTC avatar sessions.
 
+Prefer ``OjinVideoService(OjinVideoSettings(..., webrtc=WebRTCSettings(...)))``
+for new code: one service covers both the WebSocket and direct-WebRTC paths.
+This adapter is kept for existing callers.
+
 In direct mode the inference server publishes the avatar's A/V into the room
 itself, so this service pushes no audio or video frames downstream. It forwards
 the TTS audio stream to ``ojin.stv.OjinSTVWebRTCClient`` and maps the client's
 lifecycle events (derived from the server's metadata frames) onto the same
 Pipecat frames :class:`~pipecat_ojin.video.OjinVideoService` emits, keeping the
-rest of the pipeline identical between relay and direct sessions.
+rest of the pipeline identical between WebSocket and direct sessions. A failed
+or unsupported WebRTC session surfaces as a fatal ``push_error``.
 """
 
 from __future__ import annotations
