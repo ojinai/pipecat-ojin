@@ -267,7 +267,7 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         await fake.emit(STVEvent.ERROR, message="boom", code="X", fatal=True)
         svc.push_error.assert_awaited_once()
         call = svc.push_error.call_args
-        self.assertEqual(call.args[0], "boom")
+        self.assertEqual(call.args[0], "X: boom")
         self.assertTrue(call.kwargs.get("fatal"))
 
     async def test_unsupported_server_error_is_fatal(self) -> None:
@@ -288,12 +288,21 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         fake, svc = self._wired()
         await fake.emit(
             STVEvent.ERROR,
-            message="The session was not ready within 10.0 s",
+            message="Timed out: the session was not ready within 90 s",
             code=WEBRTC_JOIN_TIMEOUT,
             fatal=True,
         )
         svc.push_error.assert_awaited_once()
+        self.assertEqual(
+            svc.push_error.call_args.args[0],
+            "WEBRTC_JOIN_TIMEOUT: Timed out: the session was not ready within 90 s",
+        )
         self.assertTrue(svc.push_error.call_args.kwargs.get("fatal"))
+
+    async def test_error_event_without_code_pushes_bare_message(self) -> None:
+        fake, svc = self._wired()
+        await fake.emit(STVEvent.ERROR, message="connect failed", fatal=True)
+        self.assertEqual(svc.push_error.call_args.args[0], "connect failed")
 
     async def test_non_fatal_error_passes_fatal_false(self) -> None:
         fake, svc = self._wired()
