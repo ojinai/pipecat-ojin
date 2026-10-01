@@ -3,6 +3,13 @@
 All notable changes to `pipecat-ojin` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- A pushed error now leads with the client's error code when it has one —
+  `WEBRTC_JOIN_TIMEOUT: Timed out: the session was not ready within 90 s` — on
+  both `OjinVideoService` and `OjinSTVWebRTCService`. The code was dropped
+  before, so a pipeline error handler could only guess the cause from the prose.
+
 ## [0.1.5] - 2026-09-14
 
 - **Direct WebRTC on `OjinVideoService`.** New `OjinVideoSettings.webrtc`

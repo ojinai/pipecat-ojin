@@ -254,7 +254,7 @@ class TestEventToFrameMapping(unittest.IsolatedAsyncioTestCase):
         await fake.emit(STVEvent.ERROR, message="boom", code="X", fatal=True)
         svc.push_error.assert_awaited_once()
         call = svc.push_error.call_args
-        self.assertEqual(call.args[0], "boom")
+        self.assertEqual(call.args[0], "X: boom")
         self.assertTrue(call.kwargs.get("fatal"))
 
     async def test_error_event_without_code_kwarg(self) -> None:

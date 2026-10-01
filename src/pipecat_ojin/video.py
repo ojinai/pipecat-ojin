@@ -263,8 +263,11 @@ class OjinVideoService(FrameProcessor):
             await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
         @self._stv.on(STVEvent.ERROR)
-        async def _on_error(message="", fatal=False, **_):
-            await self.push_error(message, fatal=fatal)
+        async def _on_error(message="", fatal=False, code=None, **_):
+            # ErrorFrame has no code field, so the code leads the text: it is
+            # what a pipeline error handler (and the RTVI client) can match on.
+            text = f"{code}: {message}" if code else message
+            await self.push_error(text, fatal=fatal)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Map each inbound Pipecat frame to the matching OjinSTVClient call."""
