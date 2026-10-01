@@ -3,7 +3,7 @@
 All notable changes to `pipecat-ojin` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [0.1.6] - 2026-10-01
 
 - A pushed error now leads with the client's error code when it has one —
   `WEBRTC_JOIN_TIMEOUT: Timed out: the session was not ready within 90 s` — on
