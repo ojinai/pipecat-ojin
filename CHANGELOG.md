@@ -3,6 +3,15 @@
 All notable changes to `pipecat-ojin` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- Added `examples/foundational/ojin_livekit_avatar.py`, a single-file example that
+  runs a voice agent with the Ojin avatar published into a LiveKit room through
+  direct WebRTC.
+- README: added the company attribution, how to run the examples, and a tested
+  Pipecat version note (v1.3.0 and v1.16.0, unit tests).
+- Added missing docstrings in `pipecat_ojin.video`. No behaviour changes.
+
 ## [0.1.6] - 2026-10-01
 
 - A pushed error now leads with the client's error code when it has one —

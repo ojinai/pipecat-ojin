@@ -22,6 +22,13 @@ lip-sync stays stable, whatever cadence your TTS produces. You don't manage
 input buffering, the playback clock, or frame-dropping; `OjinVideoService` just
 sits after your TTS and lip-syncs to it.
 
+## Maintained by Ojin
+
+`pipecat-ojin` is written and maintained by [Ojin](https://ojin.ai), the company
+that provides the avatar service. It is a community integration: the Pipecat team
+does not review or maintain it. Report issues at
+[github.com/ojinai/pipecat-ojin/issues](https://github.com/ojinai/pipecat-ojin/issues).
+
 ## Install
 
 ```bash
@@ -111,10 +118,19 @@ avatar = OjinVideoService(
 `OjinSTVWebRTCService` (the earlier direct-WebRTC adapter) still works, but new
 code should use `OjinVideoService` with `webrtc=`.
 
-## Example
+## Examples
 
-A complete, runnable voice + avatar agent (browser WebRTC or Daily) lives in
-[`examples/ojin-bot/`](examples/ojin-bot/).
+- **Single-file foundational example:**
+  [`examples/foundational/ojin_livekit_avatar.py`](examples/foundational/ojin_livekit_avatar.py)
+  runs a voice agent (Deepgram, Groq, ElevenLabs) and has the Ojin avatar join a
+  LiveKit room through direct WebRTC. The file's docstring lists the install
+  command and the environment variables it needs (an Ojin API key and Face model
+  config ID, your provider keys, and your LiveKit URL, API key and secret). Run it
+  from a directory holding your `.env` with `python ojin_livekit_avatar.py`, then
+  join the same room from any LiveKit client. The LiveKit server must be reachable
+  by Ojin, so a server on `localhost` will not work.
+- **Fuller agent:** [`examples/ojin-bot/`](examples/ojin-bot/) is a runnable voice
+  and avatar agent with its own README.
 
 ## Deployment
 
@@ -142,9 +158,15 @@ Full guidance lives at **[docs.ojin.ai](https://docs.ojin.ai)** → Guides → O
 
 | Requirement | Version |
 |---|---|
-| Python | ≥ 3.11 |
-| `pipecat-ai` | ≥ 1.3.0 |
-| `ojin-client[stv]` | ≥ 0.11.0 |
+| Python | >= 3.11 |
+| `pipecat-ai` | >= 1.3.0 |
+| `ojin-client[stv]` | >= 0.11.0 |
+
+**Tested with Pipecat v1.3.0 and v1.16.0** (Python 3.12, `ojin-client` 0.12.4):
+the unit suite (`pytest tests`, 73 tests, no network) passes on both, as of
+2026-11-18. The suite uses fakes, so it does not exercise a live Ojin session.
+The foundational example was checked only for imports and pipeline construction
+against both versions; run it against your own accounts before relying on it.
 
 ## License
 

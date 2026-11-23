@@ -118,15 +118,18 @@ class _PushFrameOutput:
     """STVOutput sink: forwards the client's synced A/V downstream, behind the gate."""
 
     def __init__(self, service: "OjinVideoService") -> None:
+        """Remember the owning service whose ``push_frame`` receives the media."""
         self._svc = service
 
     async def write_audio(self, frame: STVAudioFrame) -> None:
+        """Push the avatar's synced audio downstream while the playback gate is open."""
         if self._svc._can_start_playback:
             await self._svc.push_frame(
                 OutputAudioRawFrame(frame.pcm, frame.sample_rate, frame.num_channels)
             )
 
     async def write_video(self, frame: STVVideoFrame) -> None:
+        """Push the avatar's synced video downstream while the playback gate is open."""
         if self._svc._can_start_playback and frame.rgb is not None:
             await self._svc._push_first_video_frame_once()
             out = OutputImageRawFrame(
@@ -151,7 +154,8 @@ class _PushFrameOutput:
             await self._svc.push_frame(out)
 
     def on_event(self, event: STVEvent, **kwargs: object) -> None:
-        pass  # lifecycle events are wired via the client's emitter (see _wire_events)
+        """Ignore client events here; the service subscribes to them directly."""
+        # lifecycle events are wired via the client's emitter (see _wire_events)
 
 
 class OjinVideoService(FrameProcessor):
