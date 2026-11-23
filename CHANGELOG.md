@@ -3,7 +3,7 @@
 All notable changes to `pipecat-ojin` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.7] - 2026-11-23
 
 - Added `examples/foundational/ojin_livekit_avatar.py`, a single-file example that
   runs a voice agent with the Ojin avatar published into a LiveKit room through
